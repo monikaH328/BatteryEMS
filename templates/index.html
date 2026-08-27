@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BatteryEMS — Battery Management & Energy Management System</title>
+<meta name="description" content="BatteryEMS is battery management and energy management software with live SOC, SOH, cell voltage, current, temperature, fault and EMS monitoring.">
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="{{ url_for('static', filename='chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
+<style>
+  :root{
+    --bg:#0A0D10;
+    --panel:#12171C;
+    --panel-2:#161C22;
+    --border:#212B33;
+    --text:#E4E9ED;
+    --text-muted:#7A8A94;
+    --good:#2FD9A8;
+    --good-dim:#17332C;
+    --warn:#F0A93E;
+    --warn-dim:#3A2E14;
+    --fault:#FF5470;
+    --fault-dim:#3A1620;
+    --grid-c:#4FA8FF;
+    --batt-c:#2FD9A8;
+    --none-c:#5B6670;
+    --font-display:'Space Grotesk', ui-sans-serif, sans-serif;
+    --font-body:'Inter', ui-sans-serif, sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(79,168,255,0.08), transparent),
+      radial-gradient(ellipse 900px 500px at 100% 0%, rgba(47,217,168,0.06), transparent),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    min-height:100vh;
+    padding-bottom:40px;
+  }
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:22px 32px;
+    border-bottom:1px solid var(--border);
+  }
+  .brand{display:flex; align-items:center; gap:14px;}
+  .brand-mark{
+    width:34px;height:34px;border-radius:8px;
+    background:linear-gradient(135deg, var(--batt-c), var(--grid-c));
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono); font-weight:600; font-size:14px; color:#04120E;
+  }
+  h1{
+    font-family:var(--font-display);
+    font-size:19px;
+    font-weight:600;
+    letter-spacing:0.2px;
+    margin:0;
+  }
+  .subtitle{
+    font-size:12px;
+    color:var(--text-muted);
+    font-family:var(--font-mono);
+    margin-top:2px;
+  }
+  .conn-status{
+    display:flex; align-items:center; gap:8px;
+    font-family:var(--font-mono); font-size:12px; color:var(--text-muted);
+  }
+  .dot{width:8px;height:8px;border-radius:50%; background:var(--none-c);}
+  .dot.live{background:var(--good); box-shadow:0 0 8px var(--good);}
+
+  .blackout-banner{
+    margin:16px 32px 0 32px;
+    padding:12px 18px;
+    background:var(--fault-dim);
+    border:1px solid var(--fault);
+    color:var(--fault);
+    font-family:var(--font-mono);
+    font-size:13px;
+    letter-spacing:0.3px;
+    border-radius:6px;
+    display:flex; align-items:center; gap:10px;
+  }
+  .blackout-banner.hidden{display:none;}
+
+  main{
+    display:grid;
+    grid-template-columns:260px 1fr 300px;
+    gap:18px;
+    padding:22px 32px;
+    align-items:start;
+  }
+  @media (max-width:1100px){
+    main{grid-template-columns:1fr;}
+  }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px 18px;
+  }
+  .panel + .panel{margin-top:16px;}
+  .panel-title{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    color:var(--text-muted);
+    margin:0 0 12px 0;
+  }
+
+  .pill{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:5px 11px;
+    border-radius:20px;
+    font-family:var(--font-mono);
+    font-size:12px;
+    font-weight:500;
+    border:1px solid transparent;
+  }
+  .pill.good{background:var(--good-dim); color:var(--good); border-color:rgba(47,217,168,0.35);}
+  .pill.warn{background:var(--warn-dim); color:var(--warn); border-color:rgba(240,169,62,0.35);}
+  .pill.fault{background:var(--fault-dim); color:var(--fault); border-color:rgba(255,84,112,0.4);}
+  .pill.neutral{background:#1B232B; color:var(--text-muted); border-color:var(--border);}
+
+  .source-value{
+    font-family:var(--font-display);
+    font-size:26px;
+    font-weight:700;
+    margin:6px 0 2px 0;
+  }
+  .source-value.GRID{color:var(--grid-c);}
+  .source-value.BATTERY{color:var(--batt-c);}
+  .source-value.NONE{color:var(--fault);}
+  .small-label{font-size:11px; color:var(--text-muted); font-family:var(--font-mono);}
+
+  .soc-ring-wrap{display:flex; align-items:center; gap:16px;}
+  .soc-ring{
+    width:76px; height:76px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    background:conic-gradient(var(--batt-c) 0deg, var(--border) 0deg);
+    position:relative;
+  }
+  .soc-ring::before{
+    content:"";
+    position:absolute; inset:7px;
+    background:var(--panel);
+    border-radius:50%;
+  }
+  .soc-ring-value{
+    position:relative; z-index:1;
+    font-family:var(--font-mono); font-size:15px; font-weight:600;
+  }
+
+  .stat-row{display:flex; justify-content:space-between; align-items:center; margin-top:10px;}
+  .stat-row .small-label{margin:0;}
+  .stat-value{font-family:var(--font-mono); font-size:13px;}
+
+  /* Cell voltage array -- signature element */
+  .cell-array{
+    display:flex;
+    gap:22px;
+    justify-content:center;
+    padding:18px 6px 6px 6px;
+  }
+  .cell-col{display:flex; flex-direction:column; align-items:center; gap:10px;}
+  .cell-track{
+    width:34px; height:170px;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:6px;
+    display:flex; flex-direction:column-reverse;
+    overflow:hidden;
+    position:relative;
+  }
+  .cell-fill{
+    width:100%;
+    transition:height 0.6s ease, background 0.4s ease;
+    border-radius:0;
+  }
+  .cell-fill.good{background:linear-gradient(180deg, var(--good), #17b389);}
+  .cell-fill.warn{background:linear-gradient(180deg, var(--warn), #c98420);}
+  .cell-fill.fault{background:linear-gradient(180deg, var(--fault), #d6314f);}
+  .balance-dot{
+    position:absolute; top:6px; left:50%; transform:translateX(-50%);
+    width:7px; height:7px; border-radius:50%;
+    background:var(--grid-c);
+    box-shadow:0 0 6px var(--grid-c);
+    animation:pulse 1.2s infinite ease-in-out;
+    display:none;
+  }
+  .balance-dot.active{display:block;}
+  @keyframes pulse{
+    0%,100%{opacity:0.3; transform:translateX(-50%) scale(0.85);}
+    50%{opacity:1; transform:translateX(-50%) scale(1.1);}
+  }
+  .cell-label{font-family:var(--font-mono); font-size:11px; color:var(--text-muted);}
+  .cell-voltage{font-family:var(--font-mono); font-size:13px; font-weight:600;}
+
+  .chart-wrap{height:190px; margin-top:6px;}
+  .chart-row{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;}
+  @media (max-width:800px){.chart-row{grid-template-columns:1fr;}}
+
+  /* Controls */
+  .btn-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  button{
+    font-family:var(--font-mono);
+    font-size:12px;
+    padding:9px 10px;
+    border-radius:6px;
+    border:1px solid var(--border);
+    background:var(--panel-2);
+    color:var(--text);
+    cursor:pointer;
+    transition:all 0.15s ease;
+  }
+  button:hover{border-color:var(--grid-c); color:var(--grid-c);}
+  button:active{transform:scale(0.97);}
+  button.wide{grid-column:1 / -1;}
+  button.grid-up.active{background:var(--good-dim); border-color:var(--good); color:var(--good);}
+  button.grid-down.active{background:var(--fault-dim); border-color:var(--fault); color:var(--fault);}
+  button.danger:hover{border-color:var(--fault); color:var(--fault);}
+  button.primary:hover{border-color:var(--batt-c); color:var(--batt-c);}
+
+  .fault-btn-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;}
+
+  ul.load-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px;}
+  ul.load-list li{
+    display:flex; align-items:center; gap:8px;
+    font-size:12.5px;
+    padding:7px 10px;
+    border-radius:6px;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+  }
+  ul.load-list li.active{border-color:rgba(47,217,168,0.3);}
+  ul.load-list li.shed{opacity:0.55; text-decoration:line-through; border-color:rgba(255,84,112,0.25);}
+  .load-dot{width:7px;height:7px;border-radius:50%; flex-shrink:0;}
+  .load-dot.on{background:var(--good);}
+  .load-dot.off{background:var(--fault);}
+
+  #fault-log{
+    display:flex; flex-direction:column; gap:6px;
+    max-height:170px; overflow-y:auto;
+    font-family:var(--font-mono); font-size:11.5px;
+  }
+  #fault-log .entry{
+    padding:7px 9px;
+    border-radius:5px;
+    background:var(--fault-dim);
+    color:var(--fault);
+    border:1px solid rgba(255,84,112,0.25);
+  }
+  #fault-log .empty{color:var(--text-muted); font-style:italic;}
+  #fault-log::-webkit-scrollbar{width:5px;}
+  #fault-log::-webkit-scrollbar-thumb{background:var(--border); border-radius:3px;}
+</style>
+<link rel="manifest" href="/static/manifest.json">
+</head>
+<body>
+
+<section style="max-width:1200px;margin:14px auto 0;padding:0 24px;color:#7A8A94;font-size:12px;">Battery Management and Energy Management System — live battery telemetry, SOC/SOH estimation, cell monitoring, protection alarms and energy management.</section>
+<header>
+  <div class="brand">
+    <div class="brand-mark">BE</div>
+    <div>
+      <h1>BMS / EMS Control Dashboard</h1>
+      <div class="subtitle">4-cell simulated pack · battery + grid</div>
+    </div>
+  </div>
+  <div class="conn-status">
+    <span id="conn-dot" class="dot"></span>
+    <span id="conn-label">connecting…</span>
+  </div>
+</header>
+
+<div id="blackout-banner" class="blackout-banner hidden">
+  ⚠ BLACKOUT RISK — no source can supply loads
+</div>
+
+<main>
+  <!-- LEFT COLUMN: status -->
+  <section>
+    <div class="panel">
+      <p class="panel-title">Active Source</p>
+      <div id="source-value" class="source-value NONE">—</div>
+      <div class="small-label">battery mode: <span id="batt-mode">—</span></div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Grid</p>
+      <span id="grid-pill" class="pill neutral">UNKNOWN</span>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Battery Health</p>
+      <span id="batt-pill" class="pill neutral">UNKNOWN</span>
+      <div class="soc-ring-wrap" style="margin-top:14px;">
+        <div class="soc-ring" id="soc-ring">
+          <span class="soc-ring-value" id="soc-value">--%</span>
+        </div>
+        <div>
+          <div class="stat-row" style="margin-top:0;">
+            <span class="small-label">Current</span>
+            <span class="stat-value" id="current-value">-- A</span>
+          </div>
+          <div class="stat-row">
+            <span class="small-label">Temp</span>
+            <span class="stat-value" id="temp-value">-- °C</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CENTER COLUMN: cell array + charts -->
+  <section>
+    <div class="panel">
+      <p class="panel-title">Cell Voltage Array</p>
+      <div class="cell-array" id="cell-array"><!-- filled by JS --></div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">State of Charge — history</p>
+      <div class="chart-wrap"><canvas id="socChart"></canvas></div>
+    </div>
+
+    <div class="chart-row">
+      <div class="panel">
+        <p class="panel-title">Cell Voltages — history</p>
+        <div class="chart-wrap"><canvas id="cellChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <p class="panel-title">Current &amp; Temperature</p>
+        <div class="chart-wrap"><canvas id="ctChart"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT COLUMN: controls -->
+  <section>
+    <div class="panel">
+      <p class="panel-title">Grid Control</p>
+      <div class="btn-grid">
+        <button class="grid-up" id="btn-grid-up">GRID UP</button>
+        <button class="grid-down" id="btn-grid-down">GRID DOWN</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Fault Injection</p>
+      <div class="fault-btn-grid">
+        <button data-fault="ov">OVERVOLTAGE</button>
+        <button data-fault="uv">UNDERVOLTAGE</button>
+        <button data-fault="oc">OVERCURRENT</button>
+        <button data-fault="ot">OVERTEMP</button>
+        <button data-fault="imb" class="wide">IMBALANCE</button>
+      </div>
+      <div class="btn-grid" style="margin-top:8px;">
+        <button id="btn-clear" class="wide danger">CLEAR FAULTS</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Simulation</p>
+      <div class="btn-grid">
+        <button id="btn-pause" class="primary">PAUSE</button>
+        <button id="btn-reset" class="danger">RESET</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Loads</p>
+      <ul class="load-list" id="load-list"></ul>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Fault Log</p>
+      <div id="fault-log"><div class="empty">no faults yet</div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+if (typeof Chart === 'undefined') {
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div style="background:#3A1620;color:#FF5470;padding:14px 32px;font-family:monospace;font-size:13px;">' +
+    '⚠ Chart.js failed to load from the CDN. Check your internet connection, or that your network/firewall isn\'t blocking cdn.jsdelivr.net.' +
+    '</div>');
+  throw new Error('Chart.js failed to load -- aborting dashboard init.');
+}
+
+const socket = io();
+
+setInterval(() => {
+  if (socket.connected) {
+    socket.emit('request_update');
+  }
+}, 1000);
+
+const OV_LIMIT = 4.25, UV_LIMIT = 2.95;
+const WARN_HI = 4.15, WARN_LO = 3.05;
+const SCALE_MAX = 4.30, SCALE_MIN = 2.80;
+
+const connDot = document.getElementById('conn-dot');
+const connLabel = document.getElementById('conn-label');
+
+socket.on('connect', () => {
+  connDot.classList.add('live');
+  connLabel.textContent = 'live';
+});
+socket.on('disconnect', () => {
+  connDot.classList.remove('live');
+  connLabel.textContent = 'disconnected';
+});
+
+// ---------- Chart setup ----------
+Chart.defaults.font.family = "'IBM Plex Mono', monospace";
+Chart.defaults.color = '#7A8A94';
+Chart.defaults.borderColor = '#212B33';
+
+function baseOptions(extra) {
+  return Object.assign({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    plugins: {
+      legend: { labels: { boxWidth: 10, font: { size: 10 } } },
+      tooltip: { backgroundColor: '#161C22', borderColor: '#212B33', borderWidth: 1 }
+    },
+    scales: {
+      x: { grid: { color: '#1A222A' }, ticks: { maxTicksLimit: 6, font: { size: 9 } } },
+      y: { grid: { color: '#1A222A' }, ticks: { font: { size: 9 } } }
+    }
+  }, extra || {});
+}
+
+const cellChart = new Chart(document.getElementById('cellChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [0,1,2,3].map(i => ({
+    label: 'Cell ' + i,
+    data: [],
+    borderColor: ['#2FD9A8','#4FA8FF','#C792EA','#F0A93E'][i],
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.25
+  })) },
+  options: baseOptions({ scales: { x: { grid:{color:'#1A222A'}, ticks:{maxTicksLimit:6,font:{size:9}} }, y: { min:2.8, max:4.4, grid:{color:'#1A222A'}, ticks:{font:{size:9}} } } })
+});
+
+const socChart = new Chart(document.getElementById('socChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'SOC %',
+    data: [],
+    borderColor: '#2FD9A8',
+    backgroundColor: 'rgba(47,217,168,0.12)',
+    borderWidth: 2,
+    fill: true,
+    pointRadius: 0,
+    tension: 0.25
+  }]},
+  options: baseOptions({ scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:8,font:{size:9}}}, y: { min:0, max:100, grid:{color:'#1A222A'}, ticks:{font:{size:9}} } } })
+});
+
+const ctChart = new Chart(document.getElementById('ctChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label:'Current (A)', data: [], borderColor:'#4FA8FF', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'y', tension:0.25 },
+    { label:'Temp (°C)', data: [], borderColor:'#F0A93E', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'y1', tension:0.25 }
+  ]},
+  options: baseOptions({
+    scales: {
+      x: { grid:{color:'#1A222A'}, ticks:{maxTicksLimit:6,font:{size:9}} },
+      y: { type:'linear', position:'left', grid:{color:'#1A222A'}, ticks:{font:{size:9}} },
+      y1:{ type:'linear', position:'right', grid:{display:false}, ticks:{font:{size:9}} }
+    }
+  })
+});
+
+// ---------- Cell array (signature element) ----------
+const cellArrayEl = document.getElementById('cell-array');
+function renderCellArray(voltages, balancingCells) {
+  cellArrayEl.innerHTML = '';
+  voltages.forEach((v, i) => {
+    let status = 'good';
+    if (v >= OV_LIMIT || v <= UV_LIMIT) status = 'fault';
+    else if (v >= WARN_HI || v <= WARN_LO) status = 'warn';
+
+    const pct = Math.max(0, Math.min(1, (v - SCALE_MIN) / (SCALE_MAX - SCALE_MIN)));
+    const isBalancing = balancingCells.includes(i);
+
+    const col = document.createElement('div');
+    col.className = 'cell-col';
+    col.innerHTML = `
+      <div class="cell-track">
+        <span class="balance-dot ${isBalancing ? 'active' : ''}"></span>
+        <div class="cell-fill ${status}" style="height:${(pct*100).toFixed(1)}%"></div>
+      </div>
+      <div class="cell-voltage">${v.toFixed(3)}V</div>
+      <div class="cell-label">CELL ${i}</div>
+    `;
+    cellArrayEl.appendChild(col);
+  });
+}
+
+// ---------- Fault log (client-side rolling log) ----------
+const faultLogEl = document.getElementById('fault-log');
+let lastFaultSet = new Set();
+function updateFaultLog(faults, timestamp) {
+  const currentSet = new Set(faults);
+  const newOnes = faults.filter(f => !lastFaultSet.has(f));
+  if (newOnes.length > 0) {
+    if (faultLogEl.querySelector('.empty')) faultLogEl.innerHTML = '';
+    newOnes.forEach(f => {
+      const entry = document.createElement('div');
+      entry.className = 'entry';
+      entry.textContent = `[${timestamp}] ${f}`;
+      faultLogEl.prepend(entry);
+    });
+    while (faultLogEl.children.length > 12) {
+      faultLogEl.removeChild(faultLogEl.lastChild);
+    }
+  }
+  lastFaultSet = currentSet;
+}
+
+// ---------- Main update handler ----------
+function updateSocRing(pct) {
+  const deg = Math.max(0, Math.min(360, (pct / 100) * 360));
+  const ring = document.getElementById('soc-ring');
+  let color = '#2FD9A8';
+  if (pct < 20) color = '#FF5470';
+  else if (pct < 40) color = '#F0A93E';
+  ring.style.background = `conic-gradient(${color} ${deg}deg, #212B33 ${deg}deg)`;
+  document.getElementById('soc-value').textContent = pct.toFixed(0) + '%';
+}
+
+function setPill(el, text, level) {
+  el.textContent = text;
+  el.className = 'pill ' + level;
+}
+
+socket.on('update', (payload) => {
+  const bms = payload.bms;
+  const ems = payload.ems;
+  const hist = payload.history;
+
+  // Source
+  const srcEl = document.getElementById('source-value');
+  srcEl.textContent = ems.active_source;
+  srcEl.className = 'source-value ' + ems.active_source;
+  document.getElementById('batt-mode').textContent = ems.battery_mode_commanded;
+
+  // Grid pill
+  setPill(document.getElementById('grid-pill'),
+    ems.grid_available ? 'UP' : 'DOWN',
+    ems.grid_available ? 'good' : 'fault');
+  document.getElementById('btn-grid-up').classList.toggle('active', ems.grid_available);
+  document.getElementById('btn-grid-down').classList.toggle('active', !ems.grid_available);
+
+  // Battery health pill
+  setPill(document.getElementById('batt-pill'),
+    bms.status, bms.status === 'OK' ? 'good' : 'fault');
+
+  // SOC/SOH + current/temp
+  updateSocRing(bms.soc_percent);
+  const sohEl = document.getElementById('soh-value');
+  if (sohEl && typeof bms.soh_percent === 'number') sohEl.textContent = bms.soh_percent.toFixed(1) + '%';
+  document.getElementById('current-value').textContent = bms.current_a.toFixed(2) + ' A';
+  document.getElementById('temp-value').textContent = bms.temperature_c.toFixed(1) + ' °C';
+
+  // Cell array
+  renderCellArray(bms.cell_voltages, bms.balancing_cells || []);
+
+  // Blackout banner
+  document.getElementById('blackout-banner').classList.toggle('hidden', !ems.blackout_risk);
+
+  // Loads
+  const loadListEl = document.getElementById('load-list');
+  loadListEl.innerHTML = '';
+  const allLoads = [...ems.active_loads.map(n => ({name:n, on:true})), ...ems.shed_loads.map(n => ({name:n, on:false}))];
+  allLoads.forEach(l => {
+    const li = document.createElement('li');
+    li.className = l.on ? 'active' : 'shed';
+    li.innerHTML = `<span class="load-dot ${l.on ? 'on':'off'}"></span> ${l.name}`;
+    loadListEl.appendChild(li);
+  });
+
+  // Fault log
+  updateFaultLog(bms.faults || [], payload.timestamp);
+
+  // Charts
+  cellChart.data.labels = hist.timestamps;
+  hist.cell_voltages.forEach((series, i) => { cellChart.data.datasets[i].data = series; });
+  cellChart.update('none');
+
+  socChart.data.labels = hist.timestamps;
+  socChart.data.datasets[0].data = hist.soc;
+  socChart.update('none');
+
+  ctChart.data.labels = hist.timestamps;
+  ctChart.data.datasets[0].data = hist.current;
+  ctChart.data.datasets[1].data = hist.temperature;
+  ctChart.update('none');
+});
+
+// ---------- Controls ----------
+document.getElementById('btn-grid-up').addEventListener('click', () => socket.emit('command', {type:'grid_up'}));
+document.getElementById('btn-grid-down').addEventListener('click', () => socket.emit('command', {type:'grid_down'}));
+document.getElementById('btn-clear').addEventListener('click', () => socket.emit('command', {type:'clear'}));
+document.getElementById('btn-reset').addEventListener('click', () => {
+  lastFaultSet = new Set();
+  faultLogEl.innerHTML = '<div class="empty">no faults yet</div>';
+  socket.emit('command', {type:'reset'});
+});
+
+let paused = false;
+document.getElementById('btn-pause').addEventListener('click', (e) => {
+  paused = !paused;
+  socket.emit('command', {type: paused ? 'pause' : 'resume'});
+  e.target.textContent = paused ? 'RESUME' : 'PAUSE';
+});
+
+document.querySelectorAll('[data-fault]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    socket.emit('command', {type:'fault', fault: btn.getAttribute('data-fault')});
+  });
+});
+</script>
+
+</body>
+</html>
