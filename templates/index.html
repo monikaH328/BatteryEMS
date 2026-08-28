@@ -277,6 +277,12 @@
   .history-scroll{max-height:420px; overflow-y:auto;}
   .refresh-row{display:flex; justify-content:flex-end; margin-bottom:12px;}
   select.hw-select{font-family:var(--font-mono); font-size:12px; padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); width:100%;}
+  .hw-help{margin-top:10px; font-size:11.5px; color:var(--text-muted); line-height:1.5;}
+  .hw-help.hidden{display:none;}
+  .hw-help ol{padding-left:18px; margin:8px 0;}
+  .hw-help code{background:var(--panel-2); padding:1px 5px; border-radius:4px; font-family:var(--font-mono); color:var(--text);}
+  .hw-help .warn-box{background:var(--warn-dim); border:1px solid rgba(240,169,62,0.35); color:var(--warn); border-radius:6px; padding:8px 10px; margin-top:8px;}
+  .link-btn{background:none; border:none; color:var(--grid-c); font-family:var(--font-mono); font-size:11px; cursor:pointer; padding:0; margin-top:6px; text-decoration:underline;}
 </style>
 <link rel="manifest" href="/static/manifest.json">
 </head>
@@ -384,6 +390,22 @@
       <div class="stat-row">
         <span class="small-label">Status</span>
         <span id="hw-status-pill" class="pill neutral">UNKNOWN</span>
+      </div>
+      <button class="link-btn" id="btn-toggle-help">How do I connect real hardware?</button>
+      <div class="hw-help hidden" id="hw-help-box">
+        <strong>WiFi (supported — how the ESP32 actually connects):</strong>
+        <ol>
+          <li>Flash your ESP32 with the push-mode firmware, filling in your WiFi name/password.</li>
+          <li>Set <code>API_KEY</code> in the firmware to match this server's <code>INGEST_API_KEY</code>.</li>
+          <li>Set <code>SERVER_URL</code> in the firmware to <code>https://YOUR-APP.onrender.com/api/ingest</code>.</li>
+          <li>Power on the ESP32. Open its Serial Monitor to confirm you see <code>POST -&gt; 200</code> lines.</li>
+          <li>Back here, select <strong>ESP32</strong> above and click <strong>CONNECT</strong>.</li>
+        </ol>
+        <div class="warn-box">
+          USB is <strong>not supported</strong> on this deployed link. A USB cable connects to your own
+          computer, not to this cloud server — there's no physical port here for it to read. USB only
+          works if you run this app locally on the same machine the cable is plugged into.
+        </div>
       </div>
     </div>
 
@@ -532,6 +554,11 @@ function fetchHistoryData() {
 }
 
 document.getElementById('btn-refresh-history').addEventListener('click', fetchHistoryData);
+
+document.getElementById('btn-toggle-help').addEventListener('click', () => {
+  document.getElementById('hw-help-box').classList.toggle('hidden');
+});
+
 
 document.getElementById('btn-connect-hw').addEventListener('click', () => {
   const device = document.getElementById('hw-select').value;
