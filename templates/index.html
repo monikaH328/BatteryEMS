@@ -264,6 +264,19 @@
   #fault-log .empty{color:var(--text-muted); font-style:italic;}
   #fault-log::-webkit-scrollbar{width:5px;}
   #fault-log::-webkit-scrollbar-thumb{background:var(--border); border-radius:3px;}
+  .tab-nav{display:flex; gap:8px; padding:0 32px; margin-top:14px;}
+  .tab-btn{font-family:var(--font-mono); font-size:12px; padding:8px 16px; border-radius:6px 6px 0 0; border:1px solid var(--border); border-bottom:none; background:var(--panel-2); color:var(--text-muted); cursor:pointer;}
+  .tab-btn.active{background:var(--panel); color:var(--text); border-color:var(--grid-c);}
+  .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:16px;}
+  .stat-card{background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:12px 14px;}
+  .stat-card .label{font-family:var(--font-mono); font-size:10px; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.5px;}
+  .stat-card .value{font-family:var(--font-mono); font-size:18px; font-weight:600; margin-top:4px;}
+  table.history-table{width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:11.5px;}
+  table.history-table th, table.history-table td{padding:8px 10px; text-align:left; border-bottom:1px solid var(--border);}
+  table.history-table th{color:var(--text-muted); font-weight:500; text-transform:uppercase; font-size:10px;}
+  .history-scroll{max-height:420px; overflow-y:auto;}
+  .refresh-row{display:flex; justify-content:flex-end; margin-bottom:12px;}
+  select.hw-select{font-family:var(--font-mono); font-size:12px; padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); width:100%;}
 </style>
 <link rel="manifest" href="/static/manifest.json">
 </head>
@@ -288,6 +301,12 @@
   ⚠ BLACKOUT RISK — no source can supply loads
 </div>
 
+<div class="tab-nav">
+  <button class="tab-btn active" id="tab-live" onclick="switchTab('live')">LIVE</button>
+  <button class="tab-btn" id="tab-history" onclick="switchTab('history')">HISTORY</button>
+</div>
+
+<div id="live-view">
 <main>
   <!-- LEFT COLUMN: status -->
   <section>
@@ -350,6 +369,25 @@
   <!-- RIGHT COLUMN: controls -->
   <section>
     <div class="panel">
+      <p class="panel-title">Hardware Connection</p>
+      <select class="hw-select" id="hw-select">
+        <option value="simulator">Simulator</option>
+        <option value="esp32">ESP32 (Real Hardware)</option>
+      </select>
+      <div class="btn-grid" style="margin-top:8px;">
+        <button id="btn-connect-hw" class="wide primary">CONNECT</button>
+      </div>
+      <div class="stat-row">
+        <span class="small-label">Device</span>
+        <span class="stat-value" id="hw-device-value">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="small-label">Status</span>
+        <span id="hw-status-pill" class="pill neutral">UNKNOWN</span>
+      </div>
+    </div>
+
+    <div class="panel">
       <p class="panel-title">Grid Control</p>
       <div class="btn-grid">
         <button class="grid-up" id="btn-grid-up">GRID UP</button>
@@ -390,6 +428,28 @@
     </div>
   </section>
 </main>
+</div><!-- /live-view -->
+
+<div id="history-view" style="display:none; max-width:1200px; margin:0 auto; padding:0 32px;">
+  <div class="panel">
+    <p class="panel-title">Statistics</p>
+    <div class="refresh-row"><button id="btn-refresh-history">REFRESH</button></div>
+    <div class="stat-grid" id="stats-grid"><span class="small-label">Loading…</span></div>
+  </div>
+  <div class="panel">
+    <p class="panel-title">Recent Readings</p>
+    <div class="history-scroll">
+      <table class="history-table" id="history-table">
+        <thead><tr><th>Time</th><th>SOC %</th><th>Voltage</th><th>Current</th><th>Temp</th></tr></thead>
+        <tbody id="history-table-body"><tr><td colspan="5">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <p class="panel-title">Fault History</p>
+    <div id="fault-history-list" style="font-family:var(--font-mono); font-size:11.5px;">Loading…</div>
+  </div>
+</div><!-- /history-view -->
 
 <script>
 if (typeof Chart === 'undefined') {
@@ -407,6 +467,86 @@ setInterval(() => {
     socket.emit('request_update');
   }
 }, 1000);
+
+function switchTab(name) {
+  document.getElementById('tab-live').classList.toggle('active', name === 'live');
+  document.getElementById('tab-history').classList.toggle('active', name === 'history');
+  document.getElementById('live-view').style.display = name === 'live' ? '' : 'none';
+  document.getElementById('history-view').style.display = name === 'history' ? '' : 'none';
+  if (name === 'history') fetchHistoryData();
+}
+
+function renderGenericStats(stats) {
+  const grid = document.getElementById('stats-grid');
+  grid.innerHTML = '';
+  if (!stats || Object.keys(stats).length === 0) {
+    grid.innerHTML = '<span class="small-label">No statistics available yet.</span>';
+    return;
+  }
+  Object.entries(stats).forEach(([key, value]) => {
+    const card = document.createElement('div');
+    card.className = 'stat-card';
+    const displayValue = typeof value === 'number' ? value.toFixed(2) : String(value);
+    card.innerHTML = `<div class="label">${key.replace(/_/g,' ')}</div><div class="value">${displayValue}</div>`;
+    grid.appendChild(card);
+  });
+}
+
+function renderHistoryTable(history) {
+  const tbody = document.getElementById('history-table-body');
+  tbody.innerHTML = '';
+  const timestamps = (history && history.timestamps) || [];
+  if (timestamps.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5">No history yet.</td></tr>';
+    return;
+  }
+  for (let i = timestamps.length - 1; i >= 0; i--) {
+    const tr = document.createElement('tr');
+    const soc = history.soc ? history.soc[i] : '';
+    const voltage = history.voltage ? history.voltage[i] : '';
+    const current = history.current ? history.current[i] : '';
+    const temp = history.temperature ? history.temperature[i] : '';
+    tr.innerHTML = `<td>${timestamps[i]}</td><td>${Number(soc).toFixed(1)}</td><td>${Number(voltage).toFixed(2)}</td><td>${Number(current).toFixed(2)}</td><td>${Number(temp).toFixed(1)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderFaultHistory(faults) {
+  const el = document.getElementById('fault-history-list');
+  if (!faults || faults.length === 0) {
+    el.innerHTML = '<span class="small-label">No faults recorded.</span>';
+    return;
+  }
+  el.innerHTML = faults.slice().reverse().map(f => {
+    if (typeof f === 'string') return `<div class="entry" style="margin-bottom:6px;">${f}</div>`;
+    const label = f.timestamp || f.time || '';
+    const text = f.fault_text || f.message || f.description || JSON.stringify(f);
+    return `<div class="entry" style="margin-bottom:6px;">[${label}] ${text}</div>`;
+  }).join('');
+}
+
+function fetchHistoryData() {
+  fetch('/api/history').then(r => r.json()).then(d => renderHistoryTable(d.history || {})).catch(() => {});
+  fetch('/api/statistics').then(r => r.json()).then(d => renderGenericStats(d.statistics || {})).catch(() => {});
+  fetch('/api/faults').then(r => r.json()).then(d => renderFaultHistory(d.faults || [])).catch(() => {});
+}
+
+document.getElementById('btn-refresh-history').addEventListener('click', fetchHistoryData);
+
+document.getElementById('btn-connect-hw').addEventListener('click', () => {
+  const device = document.getElementById('hw-select').value;
+  socket.emit('command', {type: 'set_device', device: device});
+});
+
+socket.on('update', (payload) => {
+  const hw = payload.hardware || {};
+  document.getElementById('hw-device-value').textContent = hw.device || '—';
+  const pill = document.getElementById('hw-status-pill');
+  const ok = !!hw.connected;
+  pill.textContent = ok ? 'CONNECTED' : 'DISCONNECTED';
+  pill.className = 'pill ' + (ok ? 'good' : 'fault');
+  document.getElementById('hw-select').value = hw.simulator ? 'simulator' : 'esp32';
+});
 
 const OV_LIMIT = 4.25, UV_LIMIT = 2.95;
 const WARN_HI = 4.15, WARN_LO = 3.05;
