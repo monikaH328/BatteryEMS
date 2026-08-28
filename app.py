@@ -49,6 +49,22 @@ def api_statistics(): return jsonify({"schema_version":"1.0","statistics":histor
 def api_faults(): return jsonify({"schema_version":"1.0","faults":history_service.faults()})
 @app.route("/robots.txt")
 def robots(): return Response("User-agent: *\nAllow: /\nSitemap: /sitemap.xml\n",mimetype="text/plain")
+@app.route("/api/ingest", methods=["POST"])
+def api_ingest():
+    key = request.headers.get("X-API-Key") or request.args.get("key")
+    if key != config.INGEST_API_KEY:
+        return jsonify({"error": "unauthorized"}), 401
+    payload = request.get_json(force=True, silent=True) or {}
+    required = {"cell_voltages", "current_a", "temperature_c"}
+    if not required.issubset(payload.keys()):
+        return jsonify({"error": "missing required fields"}), 400
+    from hardware.ingest_store import store_reading
+    try:
+        store_reading(payload["cell_voltages"], payload["current_a"], payload["temperature_c"])
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
 @app.route("/sitemap.xml")
 def sitemap():
     host=request.host_url.rstrip("/")
@@ -62,6 +78,7 @@ def handle_command(message):
     actions={"grid_up":controller.grid_up,"grid_down":controller.grid_down,"clear":controller.clear_faults,
              "pause":controller.pause,"resume":controller.resume,"reset":controller.reset}
     if command=="fault": controller.inject_fault(message.get("fault","overvoltage"))
+    elif command=="set_device": controller.set_active_device(message.get("device","simulator")); controller.connect_device()
     elif command in actions: actions[command]()
     emit_update()
 @socketio.on("request_update")

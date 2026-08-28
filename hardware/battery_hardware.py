@@ -37,17 +37,52 @@ class SimulatorHardware(BatteryHardwareInterface):
     def connected(self): return self._connected
 
 class RealBMSHardware(BatteryHardwareInterface):
-    """Safe placeholder. No protocol is invented or opened."""
+    """
+    Reads real hardware data that the ESP32 PUSHES to this server via
+    POST /api/ingest (see app.py and hardware/ingest_store.py).
+
+    This does NOT reach out to the ESP32's IP address -- that only
+    works when this app runs on the same local network as the ESP32.
+    For a publicly deployed app (e.g. on Render), the ESP32 must push
+    its readings to us instead, since the cloud cannot reach into a
+    home network. See firmware/esp32_bms_firmware_push/ for the
+    matching firmware.
+    """
     def __init__(self, transport=None):
         self.transport = transport
         self._connected = False
+
     def read(self):
-        raise NotImplementedError("RealBMSHardware needs the actual BMS/ESP32 protocol.")
-    def set_mode(self, mode): raise NotImplementedError
-    def tick(self, dt_seconds=1.0): pass
-    def inject_fault(self, fault_type): raise NotImplementedError
-    def clear_faults(self): raise NotImplementedError
-    def connect(self): raise NotImplementedError("Add the verified hardware transport before connecting.")
-    def disconnect(self): self._connected = False
+        from hardware.ingest_store import get_latest
+        latest = get_latest()
+        if latest is None:
+            return {"cell_voltages": [0.0, 0.0, 0.0, 0.0], "current_a": 0.0, "temperature_c": 0.0}
+        return dict(latest)
+
+    def set_mode(self, mode):
+        # No physical control path from a cloud server back to the
+        # ESP32 in push mode -- this is monitoring-only, matching the
+        # real circuit (no ESP32-controlled MOSFETs). Logged only.
+        pass
+
+    def tick(self, dt_seconds=1.0):
+        pass  # data arrives asynchronously whenever the ESP32 pushes
+
+    def inject_fault(self, fault_type):
+        pass  # not applicable to real hardware readings
+
+    def clear_faults(self):
+        pass
+
+    def connect(self):
+        self._connected = True
+
+    def disconnect(self):
+        self._connected = False
+
     @property
-    def connected(self): return self._connected
+    def connected(self):
+        import config
+        from hardware.ingest_store import get_latest, seconds_since_last_reading
+        age = seconds_since_last_reading()
+        return get_latest() is not None and age is not None and age <= config.INGEST_STALE_SECONDS

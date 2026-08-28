@@ -56,3 +56,23 @@ BAUD_RATE = 115200
 MCU_TIMEOUT = 1.0
 
 THEME = "Dark"
+
+
+# --------------------------------------------------------------------
+# HARDWARE PUSH INGEST (for cloud-hosted deployments like Render)
+# --------------------------------------------------------------------
+# Your ESP32 sits on your home WiFi and cannot be reached by a public
+# cloud server. Instead, the ESP32 PUSHES its readings TO this server
+# via POST /api/ingest. This key prevents random internet traffic from
+# injecting fake data into your public dashboard.
+#
+# IMPORTANT: change this to a real random string before sharing your
+# repo publicly, and set the SAME value as an environment variable
+# named INGEST_API_KEY on Render (Environment tab) rather than
+# committing your real key to GitHub.
+import os
+INGEST_API_KEY = os.getenv("INGEST_API_KEY", "change-this-secret-key")
+
+# How many seconds without a new reading before we consider the
+# hardware "disconnected" rather than just showing stale data.
+INGEST_STALE_SECONDS = 30
