@@ -8,10 +8,12 @@ before any real cells are connected.
 You can inject faults on demand (see inject_fault) to test that your
 BMS protection logic actually catches them.
 """
+import config
+
 
 import random
 
-NUM_CELLS = 4
+NUM_CELLS = config.NUM_CELLS
 
 # Reasonable Li-ion single-cell voltage bounds (volts)
 CELL_NOMINAL_V = 3.7

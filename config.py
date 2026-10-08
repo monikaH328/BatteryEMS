@@ -11,23 +11,24 @@ REPORTS_PATH = str(PROJECT_ROOT / "reports")
 LOG_DIRECTORY = str(PROJECT_ROOT / "logs")
 
 # Battery topology / rating
-NUM_CELLS = 4
-RATED_CAPACITY_AH = 2.5
+NUM_CELLS = 12  # Simulator pack size ONLY. Real hardware sends its own cell count in each reading; BMSCore adapts automatically.
+RATED_CAPACITY_AH = 6.0  # real LiFePO4 cell capacity: 6000mAh
 BATTERY_CAPACITY_AH = RATED_CAPACITY_AH
 INITIAL_SOC_PERCENT = 60.0
 
 # Sampling
 TICK_INTERVAL_SECONDS = 1.0
 UPDATE_INTERVAL = 1.0
-MAX_HISTORY_POINTS = 120
+MAX_HISTORY_POINTS = 300
+HISTORY_TAB_MAX_POINTS = 1000000  # effectively "all" history, for the History tab's charts
 
 # Cell / pack protection limits
-CELL_OVERVOLTAGE_THRESHOLD = 4.25
-CELL_UNDERVOLTAGE_THRESHOLD = 2.95
+CELL_OVERVOLTAGE_THRESHOLD = 3.75
+CELL_UNDERVOLTAGE_THRESHOLD = 2.50
 PACK_OVERCURRENT_THRESHOLD_A = 5.0
 PACK_OVERTEMP_THRESHOLD_C = 55.0
 IMBALANCE_TRIGGER_V = 0.05
-BALANCE_ACTIVE_ABOVE_V = 3.90
+BALANCE_ACTIVE_ABOVE_V = 3.40  # lowered to activate before CELL_OVERVOLTAGE_THRESHOLD (3.75) -- was 3.90, which made balancing unreachable since a fault would trip first
 
 # SOC operating limits
 SOC_STOP_CHARGE_PERCENT = 95.0
@@ -75,4 +76,4 @@ INGEST_API_KEY = os.getenv("INGEST_API_KEY", "change-this-secret-key")
 
 # How many seconds without a new reading before we consider the
 # hardware "disconnected" rather than just showing stale data.
-INGEST_STALE_SECONDS = 30
+INGEST_STALE_SECONDS = 90

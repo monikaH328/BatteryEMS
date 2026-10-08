@@ -10,6 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="{{ url_for('static', filename='chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='hammer.min.js') }}"></script>
+<script src="{{ url_for('static', filename='chartjs-plugin-zoom.min.js') }}"></script>
 <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
 <style>
   :root{
@@ -283,6 +285,18 @@
   .hw-help code{background:var(--panel-2); padding:1px 5px; border-radius:4px; font-family:var(--font-mono); color:var(--text);}
   .hw-help .warn-box{background:var(--warn-dim); border:1px solid rgba(240,169,62,0.35); color:var(--warn); border-radius:6px; padding:8px 10px; margin-top:8px;}
   .link-btn{background:none; border:none; color:var(--grid-c); font-family:var(--font-mono); font-size:11px; cursor:pointer; padding:0; margin-top:6px; text-decoration:underline;}
+  .chart-nav{display:flex; gap:6px; margin-top:8px; justify-content:center;}
+  .chart-nav-btn{font-family:var(--font-mono); font-size:10.5px; padding:5px 10px; border-radius:5px; border:1px solid var(--border); background:var(--panel-2); color:var(--text-muted); cursor:pointer;}
+  .chart-nav-btn:hover{border-color:var(--grid-c); color:var(--grid-c);}
+  /* --- cycle testing additions --- */
+  .cycle-controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+  .cycle-controls select{font-family:var(--font-mono); font-size:12px; padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);}
+  .cycle-controls button{padding:9px 16px;}
+  .cycle-status-pill{font-family:var(--font-mono); font-size:12px;}
+  table.cycle-table{width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:11.5px; margin-top:12px;}
+  table.cycle-table th, table.cycle-table td{padding:8px 10px; text-align:left; border-bottom:1px solid var(--border);}
+  table.cycle-table th{color:var(--text-muted); font-weight:500; text-transform:uppercase; font-size:10px;}
+  table.cycle-table button{padding:5px 10px; font-size:11px;}
 </style>
 <link rel="manifest" href="/static/manifest.json">
 </head>
@@ -294,7 +308,7 @@
     <div class="brand-mark">BE</div>
     <div>
       <h1>BMS / EMS Control Dashboard</h1>
-      <div class="subtitle">4-cell simulated pack · battery + grid</div>
+      <div class="subtitle" id="pack-subtitle">simulated pack · battery + grid</div>
     </div>
   </div>
   <div class="conn-status">
@@ -310,6 +324,7 @@
 <div class="tab-nav">
   <button class="tab-btn active" id="tab-live" onclick="switchTab('live')">LIVE</button>
   <button class="tab-btn" id="tab-history" onclick="switchTab('history')">HISTORY</button>
+  <button class="tab-btn" id="tab-cycles" onclick="switchTab('cycles')">CYCLES</button>
 </div>
 
 <div id="live-view">
@@ -356,7 +371,7 @@
     </div>
 
     <div class="panel">
-      <p class="panel-title">State of Charge — history</p>
+      <p class="panel-title">State of Charge — history (drag to pan, scroll/pinch to zoom)</p>
       <div class="chart-wrap"><canvas id="socChart"></canvas></div>
     </div>
 
@@ -369,6 +384,25 @@
         <p class="panel-title">Current &amp; Temperature</p>
         <div class="chart-wrap"><canvas id="ctChart"></canvas></div>
       </div>
+    </div>
+
+    <div class="chart-row">
+      <div class="panel">
+        <p class="panel-title">Voltage vs Time</p>
+        <div class="chart-wrap"><canvas id="voltageChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <p class="panel-title">Temperature vs Time</p>
+        <div class="chart-wrap"><canvas id="tempTimeChart"></canvas></div>
+      </div>
+    </div>
+    <div class="panel">
+      <p class="panel-title">Charge / Discharge Cycles vs Time</p>
+      <div class="chart-wrap"><canvas id="cycleChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <p class="panel-title">Voltage / Current / Temperature — Combined</p>
+      <div class="chart-wrap"><canvas id="combinedChart"></canvas></div>
     </div>
   </section>
 
@@ -471,7 +505,88 @@
     <p class="panel-title">Fault History</p>
     <div id="fault-history-list" style="font-family:var(--font-mono); font-size:11.5px;">Loading…</div>
   </div>
+
+  <div class="panel">
+    <p class="panel-title">State of Charge — Full History (drag to pan, scroll/pinch to zoom)</p>
+    <div style="height:260px;"><canvas id="histSocChart"></canvas></div>
+  </div>
+  <div class="panel">
+    <p class="panel-title">Cell Voltages — Full History</p>
+    <div style="height:260px;"><canvas id="histCellChart"></canvas></div>
+  </div>
+  <div class="panel">
+    <p class="panel-title">Pack Voltage — Full History</p>
+    <div style="height:260px;"><canvas id="histVoltageChart"></canvas></div>
+  </div>
+  <div class="panel">
+    <p class="panel-title">Current & Temperature — Full History</p>
+    <div style="height:260px;"><canvas id="histCtChart"></canvas></div>
+  </div>
+  <div class="panel">
+    <p class="panel-title">Voltage / Current / Temperature — Combined (Full History)</p>
+    <div style="height:260px;"><canvas id="histCombinedChart"></canvas></div>
+  </div>
 </div><!-- /history-view -->
+
+<div id="cycles-view" style="display:none; max-width:1200px; margin:0 auto; padding:0 32px;">
+  <div class="panel">
+    <p class="panel-title">Cycle Testing — Foundation (logging &amp; visualization only, no automatic charger/load/relay control)</p>
+    <div class="cycle-controls">
+      <span class="small-label">Test state:</span>
+      <select id="cycle-test-state-select">
+        <option value="CHARGE">CHARGE</option>
+        <option value="DISCHARGE">DISCHARGE</option>
+      </select>
+      <button id="btn-start-cycle" class="primary">START CYCLE</button>
+      <button id="btn-stop-cycle" class="danger">STOP CYCLE</button>
+      <span class="small-label">Current:</span>
+      <span id="cycle-current-pill" class="pill neutral cycle-status-pill">IDLE</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Cycle History</p>
+    <div class="refresh-row"><button id="btn-refresh-cycles">REFRESH</button></div>
+    <table class="cycle-table" id="cycle-table">
+      <thead><tr><th>Cycle</th><th>Test State</th><th>Status</th><th>Start Time</th><th>End Time</th><th></th></tr></thead>
+      <tbody id="cycle-table-body"><tr><td colspan="6">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel" id="cycle-detail-panel" style="display:none;">
+    <p class="panel-title" id="cycle-detail-title">Selected Cycle</p>
+    <div class="chart-row">
+      <div class="panel">
+        <p class="panel-title">Voltage vs Time</p>
+        <div style="height:220px;"><canvas id="cycleVoltageTimeChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <p class="panel-title">Current vs Time</p>
+        <div style="height:220px;"><canvas id="cycleCurrentTimeChart"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-row">
+      <div class="panel">
+        <p class="panel-title">Temperature vs Time</p>
+        <div style="height:220px;"><canvas id="cycleTempTimeChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <p class="panel-title">SOC vs Time</p>
+        <div style="height:220px;"><canvas id="cycleSocTimeChart"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-row">
+      <div class="panel">
+        <p class="panel-title">Voltage vs SOC</p>
+        <div style="height:220px;"><canvas id="cycleVoltageSocChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <p class="panel-title">Current vs SOC</p>
+        <div style="height:220px;"><canvas id="cycleCurrentSocChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div><!-- /cycles-view -->
 
 <script>
 if (typeof Chart === 'undefined') {
@@ -481,6 +596,7 @@ if (typeof Chart === 'undefined') {
     '</div>');
   throw new Error('Chart.js failed to load -- aborting dashboard init.');
 }
+if (typeof ChartZoom !== 'undefined') { Chart.register(ChartZoom); }
 
 const socket = io();
 
@@ -493,9 +609,12 @@ setInterval(() => {
 function switchTab(name) {
   document.getElementById('tab-live').classList.toggle('active', name === 'live');
   document.getElementById('tab-history').classList.toggle('active', name === 'history');
+  document.getElementById('tab-cycles').classList.toggle('active', name === 'cycles');
   document.getElementById('live-view').style.display = name === 'live' ? '' : 'none';
   document.getElementById('history-view').style.display = name === 'history' ? '' : 'none';
+  document.getElementById('cycles-view').style.display = name === 'cycles' ? '' : 'none';
   if (name === 'history') fetchHistoryData();
+  if (name === 'cycles') fetchCyclesList();
 }
 
 function renderGenericStats(stats) {
@@ -547,8 +666,134 @@ function renderFaultHistory(faults) {
   }).join('');
 }
 
+const historyPluginStyle = {
+  legend: { labels: { boxWidth: 10, font: { size: 10 } } },
+  tooltip: { backgroundColor: '#161C22', borderColor: '#212B33', borderWidth: 1 },
+  zoom: {
+    pan: { enabled: true, mode: 'x' },
+    zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+  }
+};
+
+const histSocChart = new Chart(document.getElementById('histSocChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{ label:'SOC %', data: [], borderColor:'#2FD9A8', backgroundColor:'rgba(47,217,168,0.10)', borderWidth:2, fill:true, pointRadius:0, tension:0.15 }] },
+  options: baseOptions({ plugins: historyPluginStyle, scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:8,font:{size:9}}}, y:{min:0,max:100,grid:{color:'#1A222A'},ticks:{font:{size:9}}} } })
+});
+
+const histCellChart = new Chart(document.getElementById('histCellChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [] },
+  options: baseOptions({ plugins: historyPluginStyle, scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:8,font:{size:9}}}, y:{min:0,max:3.5,grid:{color:'#1A222A'},ticks:{font:{size:9}}} } })
+});
+
+const histVoltageChart = new Chart(document.getElementById('histVoltageChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{ label:'Pack Voltage (V)', data: [], borderColor:'#4FA8FF', backgroundColor:'rgba(79,168,255,0.10)', borderWidth:2, fill:true, pointRadius:0, tension:0.15 }] },
+  options: baseOptions({ plugins: historyPluginStyle, scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:8,font:{size:9}}}, y:{grid:{color:'#1A222A'},ticks:{font:{size:9}}} } })
+});
+
+const histCtChart = new Chart(document.getElementById('histCtChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label:'Current (A)', data: [], borderColor:'#4FA8FF', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'y', tension:0.15 },
+    { label:'Temp (\u00b0C)', data: [], borderColor:'#F0A93E', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'y1', tension:0.15 }
+  ] },
+  options: baseOptions({
+    plugins: historyPluginStyle,
+    scales: {
+      x: { grid:{color:'#1A222A'}, ticks:{maxTicksLimit:8,font:{size:9}} },
+      y: { type:'linear', position:'left', grid:{color:'#1A222A'}, ticks:{font:{size:9}} },
+      y1:{ type:'linear', position:'right', grid:{display:false}, ticks:{font:{size:9}} }
+    }
+  })
+});
+
+const histCombinedChart = new Chart(document.getElementById('histCombinedChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label:'Voltage (V)', data: [], borderColor:'#4FA8FF', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'yVoltage', tension:0.15 },
+    { label:'Current (A)', data: [], borderColor:'#2FD9A8', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'yCurrent', tension:0.15 },
+    { label:'Temp (\u00b0C)', data: [], borderColor:'#F0A93E', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'yTemp', tension:0.15 }
+  ] },
+  options: baseOptions({
+    plugins: historyPluginStyle,
+    scales: {
+      x: { grid:{color:'#1A222A'}, ticks:{maxTicksLimit:8,font:{size:9}} },
+      yVoltage: { type:'linear', position:'left', grid:{color:'#1A222A'}, ticks:{font:{size:9}} },
+      yCurrent: { type:'linear', position:'right', grid:{display:false}, ticks:{font:{size:9}} },
+      yTemp: { type:'linear', position:'right', display:false, grid:{display:false} }
+    }
+  })
+});
+
+// ---- Chart nav (prev/next/reset pan buttons), works for any zoom-enabled chart ----
+function attachChartNav(chart) {
+  const wrap = chart.canvas.parentElement;
+  const nav = document.createElement('div');
+  nav.className = 'chart-nav';
+  nav.innerHTML = `
+    <button type="button" class="chart-nav-btn" data-dir="1">\u2039 Prev</button>
+    <button type="button" class="chart-nav-btn" data-dir="0">Reset</button>
+    <button type="button" class="chart-nav-btn" data-dir="-1">Next \u203a</button>
+  `;
+  wrap.insertAdjacentElement('afterend', nav);
+  nav.querySelectorAll('.chart-nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const dir = Number(btn.getAttribute('data-dir'));
+      if (dir === 0) { if (chart.resetZoom) chart.resetZoom(); return; }
+      const panAmount = chart.width * 0.3 * dir;
+      chart.pan({ x: panAmount }, undefined, 'default');
+    });
+  });
+}
+
+[histSocChart, histCellChart, histVoltageChart, histCtChart, histCombinedChart].forEach(attachChartNav);
+
+function renderHistoryCharts(history) {
+  const labels = (history && history.timestamps) || [];
+
+  histSocChart.data.labels = labels;
+  histSocChart.data.datasets[0].data = history.soc || [];
+  histSocChart.update('none');
+
+  histVoltageChart.data.labels = labels;
+  histVoltageChart.data.datasets[0].data = history.voltage || [];
+  histVoltageChart.update('none');
+
+  histCtChart.data.labels = labels;
+  histCtChart.data.datasets[0].data = history.current || [];
+  histCtChart.data.datasets[1].data = history.temperature || [];
+  histCtChart.update('none');
+
+  const cellSeries = history.cell_voltages || [];
+  const cellColors = ['#2FD9A8','#4FA8FF','#C792EA','#F0A93E'];
+  histCellChart.data.labels = labels;
+  histCellChart.data.datasets = cellSeries.map((series, i) => ({
+    label: 'Cell ' + i,
+    data: series,
+    borderColor: cellColors[i % cellColors.length],
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.15
+  }));
+  histCellChart.update('none');
+
+  histCombinedChart.data.labels = labels;
+  histCombinedChart.data.datasets[0].data = history.voltage || [];
+  histCombinedChart.data.datasets[1].data = history.current || [];
+  histCombinedChart.data.datasets[2].data = history.temperature || [];
+  histCombinedChart.update('none');
+}
+
 function fetchHistoryData() {
-  fetch('/api/history').then(r => r.json()).then(d => renderHistoryTable(d.history || {})).catch(() => {});
+  fetch('/api/history?limit=300').then(r => r.json()).then(d => {
+    renderHistoryTable(d.history || {});
+  }).catch(() => {});
+  fetch('/api/history?downsample=1500').then(r => r.json()).then(d => {
+    renderHistoryCharts(d.history || {});
+  }).catch(() => {});
   fetch('/api/statistics').then(r => r.json()).then(d => renderGenericStats(d.statistics || {})).catch(() => {});
   fetch('/api/faults').then(r => r.json()).then(d => renderFaultHistory(d.faults || [])).catch(() => {});
 }
@@ -573,11 +818,19 @@ socket.on('update', (payload) => {
   pill.textContent = ok ? 'CONNECTED' : 'DISCONNECTED';
   pill.className = 'pill ' + (ok ? 'good' : 'fault');
   document.getElementById('hw-select').value = hw.simulator ? 'simulator' : 'esp32';
+
+  // --- cycle testing: reflect current cycle/test-state on the CYCLES tab ---
+  const cyclePill = document.getElementById('cycle-current-pill');
+  if (cyclePill && payload.cycle) {
+    const ts = payload.cycle.test_state || 'IDLE';
+    cyclePill.textContent = payload.cycle.cycle_id ? `${ts} (cycle #${payload.cycle.cycle_id})` : ts;
+    cyclePill.className = 'pill cycle-status-pill ' + (ts === 'IDLE' ? 'neutral' : (ts === 'CHARGE' ? 'good' : 'warn'));
+  }
 });
 
-const OV_LIMIT = 4.25, UV_LIMIT = 2.95;
-const WARN_HI = 4.15, WARN_LO = 3.05;
-const SCALE_MAX = 4.30, SCALE_MIN = 2.80;
+const OV_LIMIT = 3.75, UV_LIMIT = 2.50;
+const WARN_HI = 3.60, WARN_LO = 2.70;
+const SCALE_MAX = 3.50, SCALE_MIN = 2.50;
 
 const connDot = document.getElementById('conn-dot');
 const connLabel = document.getElementById('conn-label');
@@ -614,7 +867,7 @@ function baseOptions(extra) {
 
 const cellChart = new Chart(document.getElementById('cellChart'), {
   type: 'line',
-  data: { labels: [], datasets: [0,1,2,3].map(i => ({
+  data: { labels: [], datasets: [/* built dynamically once real cell count is known */].map(i => ({
     label: 'Cell ' + i,
     data: [],
     borderColor: ['#2FD9A8','#4FA8FF','#C792EA','#F0A93E'][i],
@@ -623,7 +876,7 @@ const cellChart = new Chart(document.getElementById('cellChart'), {
     pointRadius: 0,
     tension: 0.25
   })) },
-  options: baseOptions({ scales: { x: { grid:{color:'#1A222A'}, ticks:{maxTicksLimit:6,font:{size:9}} }, y: { min:2.8, max:4.4, grid:{color:'#1A222A'}, ticks:{font:{size:9}} } } })
+  options: baseOptions({ plugins: historyPluginStyle, scales: { x: { grid:{color:'#1A222A'}, ticks:{maxTicksLimit:6,font:{size:9}} }, y: { min:0, max:3.5, grid:{color:'#1A222A'}, ticks:{font:{size:9}} } } })
 });
 
 const socChart = new Chart(document.getElementById('socChart'), {
@@ -638,7 +891,7 @@ const socChart = new Chart(document.getElementById('socChart'), {
     pointRadius: 0,
     tension: 0.25
   }]},
-  options: baseOptions({ scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:8,font:{size:9}}}, y: { min:0, max:100, grid:{color:'#1A222A'}, ticks:{font:{size:9}} } } })
+  options: baseOptions({ plugins: historyPluginStyle, scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:8,font:{size:9}}}, y: { min:0, max:100, grid:{color:'#1A222A'}, ticks:{font:{size:9}} } } })
 });
 
 const ctChart = new Chart(document.getElementById('ctChart'), {
@@ -648,6 +901,7 @@ const ctChart = new Chart(document.getElementById('ctChart'), {
     { label:'Temp (°C)', data: [], borderColor:'#F0A93E', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'y1', tension:0.25 }
   ]},
   options: baseOptions({
+    plugins: historyPluginStyle,
     scales: {
       x: { grid:{color:'#1A222A'}, ticks:{maxTicksLimit:6,font:{size:9}} },
       y: { type:'linear', position:'left', grid:{color:'#1A222A'}, ticks:{font:{size:9}} },
@@ -655,6 +909,56 @@ const ctChart = new Chart(document.getElementById('ctChart'), {
     }
   })
 });
+
+const voltageChart = new Chart(document.getElementById('voltageChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'Pack Voltage (V)', data: [], borderColor: '#4FA8FF',
+    backgroundColor: 'rgba(79,168,255,0.12)', borderWidth: 2, fill: true,
+    pointRadius: 0, tension: 0.25
+  }]},
+  options: baseOptions({ plugins: historyPluginStyle, scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:6,font:{size:9}}}, y:{grid:{color:'#1A222A'},ticks:{font:{size:9}}} } })
+});
+
+const tempTimeChart = new Chart(document.getElementById('tempTimeChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'Temperature (°C)', data: [], borderColor: '#F0A93E',
+    backgroundColor: 'rgba(240,169,62,0.12)', borderWidth: 2, fill: true,
+    pointRadius: 0, tension: 0.25
+  }]},
+  options: baseOptions({ plugins: historyPluginStyle, scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:6,font:{size:9}}}, y:{grid:{color:'#1A222A'},ticks:{font:{size:9}}} } })
+});
+
+const cycleChart = new Chart(document.getElementById('cycleChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'Equivalent Full Cycles', data: [], borderColor: '#C792EA',
+    backgroundColor: 'rgba(199,146,234,0.12)', borderWidth: 2, fill: true,
+    pointRadius: 0, tension: 0.25
+  }]},
+  options: baseOptions({ plugins: historyPluginStyle, scales: { x:{grid:{color:'#1A222A'},ticks:{maxTicksLimit:6,font:{size:9}}}, y:{grid:{color:'#1A222A'},ticks:{font:{size:9}}} } })
+});
+
+const combinedChart = new Chart(document.getElementById('combinedChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label:'Voltage (V)', data: [], borderColor:'#4FA8FF', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'yVoltage', tension:0.25 },
+    { label:'Current (A)', data: [], borderColor:'#2FD9A8', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'yCurrent', tension:0.25 },
+    { label:'Temp (\u00b0C)', data: [], borderColor:'#F0A93E', backgroundColor:'transparent', borderWidth:2, pointRadius:0, yAxisID:'yTemp', tension:0.25 }
+  ]},
+  options: baseOptions({
+    plugins: historyPluginStyle,
+    scales: {
+      x: { grid:{color:'#1A222A'}, ticks:{maxTicksLimit:6,font:{size:9}} },
+      yVoltage: { type:'linear', position:'left', grid:{color:'#1A222A'}, ticks:{font:{size:9}} },
+      yCurrent: { type:'linear', position:'right', grid:{display:false}, ticks:{font:{size:9}} },
+      yTemp: { type:'linear', position:'right', display:false, grid:{display:false} }
+    }
+  })
+});
+
+[cellChart, socChart, ctChart, voltageChart, tempTimeChart, cycleChart, combinedChart].forEach(attachChartNav);
 
 // ---------- Cell array (signature element) ----------
 const cellArrayEl = document.getElementById('cell-array');
@@ -770,6 +1074,19 @@ socket.on('update', (payload) => {
 
   // Charts
   cellChart.data.labels = hist.timestamps;
+  const realCellCount = (hist.cell_voltages || []).length;
+  if (cellChart.data.datasets.length !== realCellCount) {
+    const palette = ['#2FD9A8','#4FA8FF','#C792EA','#F0A93E','#FF5470','#22C55E','#EAB308','#38BDF8','#F472B6','#A3E635'];
+    cellChart.data.datasets = Array.from({length: realCellCount}, (_, i) => ({
+      label: 'Cell ' + i,
+      data: [],
+      borderColor: palette[i % palette.length],
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.25
+    }));
+  }
   hist.cell_voltages.forEach((series, i) => { cellChart.data.datasets[i].data = series; });
   cellChart.update('none');
 
@@ -781,6 +1098,24 @@ socket.on('update', (payload) => {
   ctChart.data.datasets[0].data = hist.current;
   ctChart.data.datasets[1].data = hist.temperature;
   ctChart.update('none');
+
+  voltageChart.data.labels = hist.timestamps;
+  voltageChart.data.datasets[0].data = hist.voltage;
+  voltageChart.update('none');
+
+  tempTimeChart.data.labels = hist.timestamps;
+  tempTimeChart.data.datasets[0].data = hist.temperature;
+  tempTimeChart.update('none');
+
+  cycleChart.data.labels = hist.timestamps;
+  cycleChart.data.datasets[0].data = hist.cycles;
+  cycleChart.update('none');
+
+  combinedChart.data.labels = hist.timestamps;
+  combinedChart.data.datasets[0].data = hist.voltage;
+  combinedChart.data.datasets[1].data = hist.current;
+  combinedChart.data.datasets[2].data = hist.temperature;
+  combinedChart.update('none');
 });
 
 // ---------- Controls ----------
@@ -805,6 +1140,119 @@ document.querySelectorAll('[data-fault]').forEach(btn => {
     socket.emit('command', {type:'fault', fault: btn.getAttribute('data-fault')});
   });
 });
+
+// ==========================================================
+// CYCLE TESTING (additive) -- logging & visualization only.
+// No charger/load/relay is ever controlled from here.
+// ==========================================================
+function cycleLineChart(canvasId, label, color, xLabel) {
+  return new Chart(document.getElementById(canvasId), {
+    type: 'line',
+    data: { labels: [], datasets: [{
+      label: label, data: [], borderColor: color,
+      backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.2
+    }]},
+    options: baseOptions({
+      plugins: { legend: { labels: { boxWidth: 10, font: { size: 10 } } }, tooltip: { backgroundColor:'#161C22', borderColor:'#212B33', borderWidth:1 } },
+      scales: {
+        x: { title: { display: true, text: xLabel, font:{size:9} }, grid:{color:'#1A222A'}, ticks:{maxTicksLimit:6,font:{size:9}} },
+        y: { grid:{color:'#1A222A'}, ticks:{font:{size:9}} }
+      }
+    })
+  });
+}
+
+let cycleVoltageTimeChart, cycleCurrentTimeChart, cycleTempTimeChart, cycleSocTimeChart,
+    cycleVoltageSocChart, cycleCurrentSocChart;
+
+function ensureCycleChartsBuilt() {
+  if (cycleVoltageTimeChart) return;
+  cycleVoltageTimeChart = cycleLineChart('cycleVoltageTimeChart', 'Voltage (V)', '#4FA8FF', 'Time');
+  cycleCurrentTimeChart = cycleLineChart('cycleCurrentTimeChart', 'Current (A)', '#2FD9A8', 'Time');
+  cycleTempTimeChart = cycleLineChart('cycleTempTimeChart', 'Temperature (°C)', '#F0A93E', 'Time');
+  cycleSocTimeChart = cycleLineChart('cycleSocTimeChart', 'SOC (%)', '#C792EA', 'Time');
+  cycleVoltageSocChart = cycleLineChart('cycleVoltageSocChart', 'Voltage (V)', '#4FA8FF', 'SOC (%)');
+  cycleCurrentSocChart = cycleLineChart('cycleCurrentSocChart', 'Current (A)', '#2FD9A8', 'SOC (%)');
+}
+
+function fetchCyclesList() {
+  fetch('/api/cycles').then(r => r.json()).then(d => renderCycleTable(d.cycles || [])).catch(() => {});
+}
+
+function renderCycleTable(cycles) {
+  const tbody = document.getElementById('cycle-table-body');
+  tbody.innerHTML = '';
+  if (!cycles || cycles.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6">No cycles yet. Start one above.</td></tr>';
+    return;
+  }
+  cycles.forEach(c => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>Cycle ${c.cycle_number}</td><td>${c.test_state}</td><td>${c.status}</td><td>${c.start_time || ''}</td><td>${c.end_time || '—'}</td><td></td>`;
+    const viewTd = tr.lastElementChild;
+    const viewBtn = document.createElement('button');
+    viewBtn.textContent = 'VIEW';
+    viewBtn.addEventListener('click', () => viewCycle(c.id, c.cycle_number));
+    viewTd.appendChild(viewBtn);
+    tbody.appendChild(tr);
+  });
+}
+
+function viewCycle(cycleId, cycleNumber) {
+  ensureCycleChartsBuilt();
+  fetch(`/api/cycles/${cycleId}`).then(r => r.json()).then(d => {
+    const readings = d.readings || {};
+    const labels = readings.timestamps || [];
+    const soc = readings.soc || [];
+
+    document.getElementById('cycle-detail-panel').style.display = '';
+    document.getElementById('cycle-detail-title').textContent = `Cycle ${cycleNumber} — ${readings.timestamps.length} readings`;
+
+    cycleVoltageTimeChart.data.labels = labels;
+    cycleVoltageTimeChart.data.datasets[0].data = readings.voltage || [];
+    cycleVoltageTimeChart.update('none');
+
+    cycleCurrentTimeChart.data.labels = labels;
+    cycleCurrentTimeChart.data.datasets[0].data = readings.current || [];
+    cycleCurrentTimeChart.update('none');
+
+    cycleTempTimeChart.data.labels = labels;
+    cycleTempTimeChart.data.datasets[0].data = readings.temperature || [];
+    cycleTempTimeChart.update('none');
+
+    cycleSocTimeChart.data.labels = labels;
+    cycleSocTimeChart.data.datasets[0].data = soc;
+    cycleSocTimeChart.update('none');
+
+    // Voltage vs SOC / Current vs SOC use SOC values as the x-axis labels
+    cycleVoltageSocChart.data.labels = soc;
+    cycleVoltageSocChart.data.datasets[0].data = readings.voltage || [];
+    cycleVoltageSocChart.update('none');
+
+    cycleCurrentSocChart.data.labels = soc;
+    cycleCurrentSocChart.data.datasets[0].data = readings.current || [];
+    cycleCurrentSocChart.update('none');
+
+    document.getElementById('cycle-detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }).catch(() => {});
+}
+
+document.getElementById('btn-start-cycle').addEventListener('click', () => {
+  const testState = document.getElementById('cycle-test-state-select').value;
+  fetch('/api/cycles/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ test_state: testState })
+  }).then(() => fetchCyclesList()).catch(() => {});
+});
+
+document.getElementById('btn-stop-cycle').addEventListener('click', () => {
+  fetch('/api/cycles/stop', { method: 'POST' })
+    .then(() => fetchCyclesList())
+    .catch(() => {});
+});
+
+document.getElementById('btn-refresh-cycles').addEventListener('click', fetchCyclesList);
 </script>
 
 </body>

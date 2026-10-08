@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QGroupBox,
 )
+import config
 from PySide6.QtCore import Qt
 
 
@@ -63,7 +64,7 @@ class LiveMonitorPage(QWidget):
 
         self.cell_values = []
         self.cell_grid = QGridLayout()
-        for idx in range(4):
+        for idx in range(config.NUM_CELLS):
             cell_name = QLabel(f"Cell {idx + 1}")
             cell_name.setStyleSheet("color: #9CA3AF; font-weight: bold;")
             cell_value = QLabel("-- V")

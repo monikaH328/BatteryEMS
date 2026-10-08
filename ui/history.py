@@ -74,7 +74,7 @@ class HistoryPage(QWidget):
         if self.controller is None:
             return
         try:
-            data = self.controller.get_history(limit=100)
+            data = self.controller.get_history(limit=None)
             self._render_table(data)
             self._render_charts(data)
         except Exception as exc:  # pragma: no cover - UI fallback

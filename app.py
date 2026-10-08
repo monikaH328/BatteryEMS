@@ -11,15 +11,17 @@ from services.alarm_service import AlarmService
 app=Flask(__name__); app.config["SECRET_KEY"]="batteryems"
 socketio=SocketIO(app,cors_allowed_origins="*",async_mode="threading")
 db.init_database(); controller=BatteryController()
+controller.bms.seed_cycles(controller.repository.get_last_equivalent_full_cycles())
 history_service=HistoricalDataService(); alarm_service=AlarmService()
 _loop_started=False; _loop_lock=threading.Lock()
 
-def history_payload(limit=None): return history_service.get_history(limit or config.MAX_HISTORY_POINTS)
+def history_payload(limit=None, downsample=None): return history_service.get_history(limit or config.MAX_HISTORY_POINTS, downsample=downsample)
 def build_payload():
     live=controller.get_live_data()
     return {"schema_version":"1.0","timestamp":live["timestamp"],"bms":live["bms"],"ems":live["ems"],
             "hardware":live["hardware"],"simulation_running":live["simulation_running"],
-            "alarms":alarm_service.evaluate(live["bms"]),"history":history_payload()}
+            "alarms":alarm_service.evaluate(live["bms"]),"history":history_payload(),
+            "cycle":controller.get_current_cycle_status()}
 
 def emit_update(): socketio.emit("update",build_payload())
 def background_loop():
@@ -40,7 +42,11 @@ def health(): return jsonify({"status":"ok","service":"BatteryEMS","schema_versi
 def api_live(): return jsonify(build_payload())
 @app.route("/api/history")
 @app.route("/api/v1/history")
-def api_history(): return jsonify({"schema_version":"1.0","history":history_payload()})
+def api_history():
+    requested_limit = request.args.get("limit", type=int)
+    limit = requested_limit if requested_limit else config.HISTORY_TAB_MAX_POINTS
+    downsample = request.args.get("downsample", type=int)
+    return jsonify({"schema_version":"1.0","history":history_payload(limit, downsample)})
 @app.route("/api/statistics")
 @app.route("/api/v1/statistics")
 def api_statistics(): return jsonify({"schema_version":"1.0","statistics":history_service.statistics()})
@@ -64,6 +70,49 @@ def api_ingest():
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"ok": True})
+
+# --------------------------------------------------------------------
+# CYCLE TESTING (additive). Pure logging/labeling -- no charger, load
+# or relay is ever controlled by these endpoints.
+# --------------------------------------------------------------------
+@app.route("/api/cycles/start", methods=["POST"])
+@app.route("/api/v1/cycles/start", methods=["POST"])
+def api_cycle_start():
+    payload = request.get_json(silent=True) or {}
+    test_state = payload.get("test_state", "CHARGE")
+    cycle = controller.start_cycle(test_state)
+    emit_update()
+    return jsonify({"schema_version": "1.0", "cycle": cycle})
+
+@app.route("/api/cycles/stop", methods=["POST"])
+@app.route("/api/v1/cycles/stop", methods=["POST"])
+def api_cycle_stop():
+    stopped_id = controller.stop_cycle()
+    emit_update()
+    return jsonify({"schema_version": "1.0", "stopped_cycle_id": stopped_id})
+
+@app.route("/api/cycles")
+@app.route("/api/v1/cycles")
+def api_cycles_list():
+    return jsonify({"schema_version": "1.0", "cycles": controller.get_cycles()})
+
+@app.route("/api/cycles/<int:cycle_id>")
+@app.route("/api/v1/cycles/<int:cycle_id>")
+def api_cycle_detail(cycle_id):
+    cycles = controller.get_cycles()
+    cycle = next((c for c in cycles if c["id"] == cycle_id), None)
+    readings = controller.get_cycle_readings(cycle_id)
+    return jsonify({
+        "schema_version": "1.0",
+        "cycle": cycle,
+        "readings": {
+            "timestamps": [r["timestamp"] for r in readings],
+            "voltage": [float(r["pack_voltage"]) for r in readings],
+            "current": [float(r["pack_current"]) for r in readings],
+            "temperature": [float(r["temperature"]) for r in readings],
+            "soc": [float(r["soc_percent"]) for r in readings],
+        }
+    })
 
 @app.route("/sitemap.xml")
 def sitemap():

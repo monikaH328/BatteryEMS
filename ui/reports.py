@@ -100,7 +100,7 @@ class ReportsPage(QWidget):
 
     def generate_battery_report(self):
         try:
-            data = self.controller.get_live_data() if self.controller else {"soc": 0.0, "voltage": 0.0, "current": 0.0, "temperature": 0.0, "cells": [0.0] * 4, "status": "OK", "balancing": []}
+            data = self.controller.get_live_data() if self.controller else {"soc": 0.0, "voltage": 0.0, "current": 0.0, "temperature": 0.0, "cells": [0.0] * config.NUM_CELLS, "status": "OK", "balancing": []}
             report_dir = self._ensured_reports_dir()
             file_path = report_dir / "battery_report.pdf"
             doc = SimpleDocTemplate(str(file_path), pagesize=letter)
@@ -113,7 +113,7 @@ class ReportsPage(QWidget):
                      Paragraph(f"Battery status: {data.get('bms', {}).get('status', 'OK')}", styles["Normal"]),
                      Paragraph(f"Balancing status: {data.get('bms', {}).get('balancing_cells', []) or 'None'}", styles["Normal"]),
                      Spacer(1, 10)]
-            cell_values = data.get("bms", {}).get("cell_voltages", [0.0] * 4)
+            cell_values = data.get("bms", {}).get("cell_voltages", [0.0] * config.NUM_CELLS)
             cell_table = [[f"Cell {idx + 1}", f"{float(v):.3f} V"] for idx, v in enumerate(cell_values[:4])]
             story.append(Table(cell_table, colWidths=[120, 200]))
             story.append(Spacer(1, 12))

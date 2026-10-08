@@ -15,12 +15,18 @@ _latest = None
 _last_received_monotonic = 0.0
 
 
+# TEMP FIX: firmware's ACS712 sign is inverted (discharge reads positive,
+# charge reads negative). Flip here until the .ino is reflashed with
+# CURRENT_SIGN = -1.0. Remove this multiplier once that reflash is done,
+# to avoid double-inverting.
+CURRENT_SIGN_CORRECTION = -1.0
+
 def store_reading(cell_voltages, current_a, temperature_c):
     global _latest, _last_received_monotonic
     with _lock:
         _latest = {
             "cell_voltages": [float(v) for v in cell_voltages],
-            "current_a": float(current_a),
+            "current_a": float(current_a) * CURRENT_SIGN_CORRECTION,
             "temperature_c": float(temperature_c),
         }
         _last_received_monotonic = time.monotonic()
